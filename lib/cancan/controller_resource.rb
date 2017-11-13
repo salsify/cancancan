@@ -20,7 +20,7 @@ module CanCan
     def initialize(controller, *args)
       @controller = controller
       @params = controller.params
-      @options = args.extract_options!
+      @options = controller.try(:cancancan_params) || args.extract_options!
       @name = args.first
     end
 
@@ -40,6 +40,8 @@ module CanCan
 
     def authorize_resource
       return if skip?(:authorize)
+      resource = resource_instance || resource_class_with_parent
+      raise 'Unable to authorize' if resource.nil?
       @controller.authorize!(authorization_action, resource_instance || resource_class_with_parent)
     end
 
@@ -120,7 +122,7 @@ module CanCan
     end
 
     def authorization_action
-      parent? ? parent_authorization_action : @params[:action].to_sym
+      @controller.canonical_action #parent? ? parent_authorization_action : @params[:action].to_sym
     end
 
     def parent_authorization_action
@@ -140,6 +142,8 @@ module CanCan
     end
 
     def member_action?
+      return true if Array.wrap(@options[:member_actions]).include?(@params[:action].to_sym)
+
       new_actions.include?(@params[:action].to_sym) || @options[:singleton] ||
         ((@params[:id] || @params[@options[:id_param]]) &&
           !collection_actions.include?(@params[:action].to_sym))
@@ -149,15 +153,17 @@ module CanCan
     # If +false+ is passed in it will use the resource name as a symbol in which case it should
     # only be used for authorization, not loading since there's no class to load through.
     def resource_class
-      case @options[:class]
-      when false then
-        name.to_sym
-      when nil then
-        namespaced_name.to_s.camelize.constantize
-      when String then
-        @options[:class].constantize
+      if @options[:class].present?
+        case @options[:class]
+        when false then
+          name.to_sym
+        when String then
+          @options[:class].constantize
+        else
+          @options[:class]
+        end
       else
-        @options[:class]
+        @controller.security_entity
       end
     end
 
